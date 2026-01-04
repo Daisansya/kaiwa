@@ -3,12 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <title>会話</title>
+  <script src="/socket.io/socket.io.js"></script>
 
   <style>
     body {
       margin: 0;
       font-family: sans-serif;
       background: #f5f5f5;
+
+      /* 完全中央配置 */
       display: flex;
       justify-content: center;
       align-items: center;
@@ -18,10 +21,14 @@
     #container {
       width: 100%;
       max-width: 600px;
-      background: white;
+      background: #ffffff;
       padding: 20px;
-      border-radius: 8px;
       box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      border-radius: 6px;
+    }
+
+    h1 {
+      text-align: center;
     }
 
     #chat {
@@ -30,36 +37,40 @@
 
     #messages {
       border: 1px solid #ccc;
-      height: 250px;
+      height: 300px;
       overflow-y: auto;
       padding: 10px;
+      background: #fff;
       margin-bottom: 10px;
     }
 
-    .counselor {
-      color: blue;
+    .system {
+      color: gray;
+      font-size: 0.9em;
     }
 
-    .client {
-      color: green;
+    .me {
+      font-weight: bold;
     }
 
-    .notice {
-      color: red;
-      text-align: center;
-      margin: 10px 0;
+    button {
+      margin-right: 5px;
     }
 
-    #footer {
+    #notice {
       margin-top: 20px;
-      font-size: 12px;
+      font-size: 0.8em;
       color: #666;
+      line-height: 1.5;
+      border-top: 1px solid #ddd;
+      padding-top: 10px;
     }
   </style>
 </head>
 
 <body>
   <div id="container">
+
     <h1>会話</h1>
 
     <div id="select">
@@ -80,70 +91,75 @@
       <button onclick="disconnectChat()">切断</button>
     </div>
 
-    <div id="footer">
-      <p>
-        本サービスは、個人同士の自由な対話の場を提供するものです。<br />
-        本サービス上で行われる発言の内容について、運営者は責任を負いません。<br />
-        誹謗中傷、違法行為、公序良俗に反する発言は禁止します。<br />
-        不適切な発言があった場合は、直ちに会話を終了してください。
-      </p>
+    <!-- 注意書き -->
+    <div id="notice">
+      本サービスは、個人同士の自由な対話の場を提供するものです。<br>
+      本サービス上で行われる発言の内容について、運営者は責任を負いません。<br>
+      誹謗中傷、違法行為、公序良俗に反する発言は禁止します。<br>
+      不適切な発言があった場合は、直ちに会話を終了してください。
     </div>
+
   </div>
 
-  <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
 
-    let myRole = "";
+    const selectDiv = document.getElementById("select");
+    const chatDiv = document.getElementById("chat");
+    const statusP = document.getElementById("status");
+    const messagesDiv = document.getElementById("messages");
+    const roleLabel = document.getElementById("roleLabel");
 
     function selectRole(role) {
-      myRole = role;
       const name = document.getElementById("nameInput").value;
       socket.emit("selectRole", { role, name });
-      document.getElementById("status").textContent = "待機中...";
+      statusP.textContent = "待機中です…";
     }
 
     socket.on("waiting", () => {
-      document.getElementById("status").textContent = "相手を待っています...";
+      statusP.textContent = "待機中です…";
     });
 
-    socket.on("matched", ({ role, partnerName }) => {
-      document.getElementById("select").style.display = "none";
-      document.getElementById("chat").style.display = "block";
-      document.getElementById("roleLabel").textContent =
-        `${role === "counselor" ? "相談員" : "相談者"}として接続中（相手：${partnerName}）`;
+    socket.on("matched", (data) => {
+      selectDiv.style.display = "none";
+      chatDiv.style.display = "block";
+
+      roleLabel.textContent =
+        `あなた：${data.myRole}（${data.myName}） ／ 相手：${data.partnerRole}（${data.partnerName}）`;
+
+      addSystemMessage("マッチしました。会話を始めてください。");
     });
 
-    socket.on("message", ({ text, from, role }) => {
-      const div = document.createElement("div");
-      div.textContent = `${from}：${text}`;
-      div.className = role;
-      document.getElementById("messages").appendChild(div);
-    });
-
-    socket.on("partnerDisconnected", () => {
-      alert("相手が切断しました");
-      resetUI();
+    socket.on("chat", (data) => {
+      const p = document.createElement("p");
+      p.innerHTML = `<strong>${data.role}（${data.name}）:</strong> ${data.message}`;
+      messagesDiv.appendChild(p);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
     });
 
     function sendMessage() {
       const input = document.getElementById("messageInput");
-      if (input.value.trim()) {
-        socket.emit("message", input.value);
-        input.value = "";
-      }
+      if (!input.value) return;
+
+      const p = document.createElement("p");
+      p.className = "me";
+      p.textContent = "あなた: " + input.value;
+      messagesDiv.appendChild(p);
+
+      socket.emit("chat", input.value);
+      input.value = "";
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
     }
 
     function disconnectChat() {
-      socket.emit("disconnectChat");
-      resetUI();
+      location.reload();
     }
 
-    function resetUI() {
-      document.getElementById("chat").style.display = "none";
-      document.getElementById("select").style.display = "block";
-      document.getElementById("messages").innerHTML = "";
-      document.getElementById("status").textContent = "";
+    function addSystemMessage(text) {
+      const p = document.createElement("p");
+      p.className = "system";
+      p.textContent = text;
+      messagesDiv.appendChild(p);
     }
   </script>
 </body>
