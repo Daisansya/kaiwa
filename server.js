@@ -1,56 +1,77 @@
 const express = require("express");
+const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
+
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = new Server(server);
 
-app.use(express.static("public"));
+const PORT = process.env.PORT || 3000;
 
-let waitingCounselor = null;
-let waitingClient = null;
+app.use(express.static(__dirname));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
+
+let waiting = null;
 
 io.on("connection", (socket) => {
-  console.log("接続:", socket.id);
+  socket.on("join", (data) => {
+    socket.role = data.role;
+    socket.name = data.name;
 
-  socket.on("selectRole", ({ role, name }) => {
-    socket.role = role;
-    socket.name = name;
-
-    if (role === "counselor") {
-      waitingCounselor = socket;
+    if (waiting === null) {
+      waiting = socket;
     } else {
-      waitingClient = socket;
-    }
+      const partner = waiting;
+      waiting = null;
 
-    if (waitingCounselor && waitingClient) {
-      waitingCounselor.emit("matched", {
-        partnerRole: "相談者",
-        partnerName: waitingClient.name,
-      });
-      waitingClient.emit("matched", {
-        partnerRole: "相談員",
-        partnerName: waitingCounselor.name,
+      socket.partner = partner;
+      partner.partner = socket;
+
+      socket.emit("matched", {
+        role: partner.role,
+        name: partner.name,
       });
 
-      waitingCounselor = null;
-      waitingClient = null;
-    } else {
-      socket.emit("waiting");
+      partner.emit("matched", {
+        role: socket.role,
+        name: socket.name,
+      });
     }
   });
 
-  socket.on("disconnectChat", () => {
-    socket.role = null;
-    socket.name = null;
-    socket.emit("reset");
+  socket.on("message", (text) => {
+    if (socket.partner) {
+      socket.emit("message", {
+        text,
+        role: socket.role,
+        name: socket.name,
+        self: true,
+      });
+
+      socket.partner.emit("message", {
+        text,
+        role: socket.role,
+        name: socket.name,
+        self: false,
+      });
+    }
   });
 
   socket.on("disconnect", () => {
-    if (waitingCounselor === socket) waitingCounselor = null;
-    if (waitingClient === socket) waitingClient = null;
+    if (waiting === socket) {
+      waiting = null;
+    }
+    if (socket.partner) {
+      socket.partner.emit("disconnected");
+      socket.partner.partner = null;
+    }
   });
 });
 
-const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
