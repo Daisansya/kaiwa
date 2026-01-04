@@ -1,125 +1,145 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>会話</title>
-
   <style>
     body {
-      font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
-      background: #f6f6f4;
-      color: #222;
+      font-family: sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+    }
+    #chat, #roleSelect {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
       max-width: 600px;
-      margin: 40px auto;
-      line-height: 1.7;
+      margin: auto;
     }
-
-    h1 {
-      font-size: 1.4em;
-      margin-bottom: 20px;
+    #messages {
+      border: 1px solid #ccc;
+      height: 250px;
+      overflow-y: auto;
+      padding: 10px;
+      margin-bottom: 10px;
     }
-
+    .me {
+      color: blue;
+    }
+    .other {
+      color: green;
+    }
+    .system {
+      color: gray;
+      font-style: italic;
+    }
     button {
-      background: none;
-      border: 1px solid #888;
-      padding: 6px 14px;
       margin-right: 10px;
-      cursor: pointer;
-      font-size: 0.9em;
-    }
-
-    button:hover {
-      background: #eaeaea;
-    }
-
-    #chat {
-      margin-top: 30px;
-    }
-
-    #msg {
-      width: 80%;
-      padding: 6px;
-      font-size: 0.9em;
-    }
-
-    ul#log {
-      margin-top: 20px;
-    }
-
-    ul#log li {
-      max-width: 80%;
-      padding: 6px 10px;
-      border-radius: 6px;
-    }
-
-    ul#log li[style*="right"] {
-      margin-left: auto;
-      background: #dde7ff;
-    }
-
-    ul#log li[style*="left"] {
-      background: #ffffff;
     }
   </style>
 </head>
 <body>
-  <h1 id="status">役割を選んでください</h1>
 
-  <button onclick="selectRole('consultant')">相談員</button>
-  <button onclick="selectRole('client')">相談者</button>
+<div id="roleSelect">
+  <h2>会話</h2>
 
-  <div id="chat" style="display:none; margin-top:20px;">
-    <input id="msg" placeholder="メッセージ">
-    <button onclick="send()">送信</button>
-    <ul id="log" style="list-style:none; padding:0;"></ul>
-  </div>
+  <p>
+    名前（任意）：
+    <input id="nameInput" placeholder="匿名でも可" />
+  </p>
 
-  <!-- socket.io を読み込む（消さない） -->
-  <script src="/socket.io/socket.io.js"></script>
+  <p>立場を選んでください：</p>
+  <button onclick="selectRole('相談員')">相談員</button>
+  <button onclick="selectRole('相談者')">相談者</button>
 
-  <!-- ここから下が JavaScript 本体 -->
-  <script>
-    const socket = io();
+  <p id="status">待機していません</p>
+</div>
 
-    function selectRole(role) {
-      socket.emit("selectRole", role);
-      document.getElementById("status").innerText = "待機中です…";
-    }
+<div id="chat" style="display:none;">
+  <h3 id="chatTitle"></h3>
 
-    socket.on("matched", () => {
-      document.getElementById("status").innerText = "相手が見つかりました";
+  <div id="messages"></div>
+
+  <input id="messageInput" placeholder="メッセージを入力" />
+  <button onclick="sendMessage()">送信</button>
+  <button onclick="disconnect()">切断</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  let socket = null;
+  let myRole = "";
+  let myName = "";
+
+  function selectRole(role) {
+    myRole = role;
+    myName = document.getElementById("nameInput").value || "匿名";
+
+    socket = io();
+
+    document.getElementById("status").innerText = "待機中です…";
+
+    socket.emit("join", { role: myRole, name: myName });
+
+    socket.on("matched", (data) => {
+      document.getElementById("roleSelect").style.display = "none";
       document.getElementById("chat").style.display = "block";
+
+      document.getElementById("chatTitle").innerText =
+        `あなた：${myRole}（${myName}） / 相手：${data.role}（${data.name}）`;
+
+      addSystemMessage("相手が見つかりました");
     });
 
-    function addMessage(text, who) {
-      const li = document.createElement("li");
-      li.innerText = text;
-      li.style.margin = "5px 0";
-
-      if (who === "me") {
-        li.style.textAlign = "right";
-        li.style.color = "blue";
-      } else {
-        li.style.textAlign = "left";
-        li.style.color = "black";
-      }
-
-      document.getElementById("log").appendChild(li);
-    }
-
-    function send() {
-      const input = document.getElementById("msg");
-      const text = input.value.trim();
-      if (!text) return;
-
-      addMessage(text, "me");
-      socket.emit("message", text);
-      input.value = "";
-    }
-
-    socket.on("message", (msg) => {
-      addMessage(msg, "other");
+    socket.on("message", (data) => {
+      addMessage(
+        `${data.role}（${data.name}）： ${data.text}`,
+        data.self ? "me" : "other"
+      );
     });
-  </script>
+
+    socket.on("disconnected", () => {
+      addSystemMessage("相手が切断しました");
+      resetToStart();
+    });
+  }
+
+  function sendMessage() {
+    const input = document.getElementById("messageInput");
+    if (!input.value) return;
+
+    socket.emit("message", input.value);
+    input.value = "";
+  }
+
+  function disconnect() {
+    if (socket) {
+      socket.disconnect();
+    }
+    resetToStart();
+  }
+
+  function resetToStart() {
+    document.getElementById("chat").style.display = "none";
+    document.getElementById("roleSelect").style.display = "block";
+    document.getElementById("status").innerText = "待機していません";
+    document.getElementById("messages").innerHTML = "";
+  }
+
+  function addMessage(text, className) {
+    const div = document.createElement("div");
+    div.className = className;
+    div.innerText = text;
+    document.getElementById("messages").appendChild(div);
+  }
+
+  function addSystemMessage(text) {
+    const div = document.createElement("div");
+    div.className = "system";
+    div.innerText = text;
+    document.getElementById("messages").appendChild(div);
+  }
+</script>
+
 </body>
 </html>
