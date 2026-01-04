@@ -1,86 +1,82 @@
 const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
+const path = require("path");
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+const http = require("http").createServer(app);
+const io = require("socket.io")(http);
 
-app.use(express.static("public"));
+app.use(express.static(__dirname));
 
-let waiting = {
-  counselor: null,
-  client: null,
-};
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "index.html"));
+});
 
-let pairs = new Map(); // socket.id -> partner socket.id
+let waitingCounselor = null;
+let waitingClient = null;
 
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
 
   socket.on("selectRole", ({ role, name }) => {
     socket.role = role;
     socket.name = name || "匿名";
 
-    const opposite = role === "counselor" ? "client" : "counselor";
+    if (socket.matched) return;
 
-    if (waiting[opposite]) {
-      const partner = waiting[opposite];
-      waiting[opposite] = null;
+    if (role === "counselor") {
+      if (waitingCounselor) {
+        socket.emit("waiting");
+        return;
+      }
+      waitingCounselor = socket;
+    }
 
-      pairs.set(socket.id, partner.id);
-      pairs.set(partner.id, socket.id);
+    if (role === "client") {
+      if (waitingClient) {
+        socket.emit("waiting");
+        return;
+      }
+      waitingClient = socket;
+    }
 
-      socket.emit("matched", {
-        role,
-        partnerName: partner.name,
+    if (waitingCounselor && waitingClient) {
+      waitingCounselor.matched = true;
+      waitingClient.matched = true;
+
+      waitingCounselor.emit("matched", {
+        myRole: "相談員",
+        myName: waitingCounselor.name,
+        partnerRole: "相談者",
+        partnerName: waitingClient.name
       });
 
-      partner.emit("matched", {
-        role: opposite,
-        partnerName: socket.name,
+      waitingClient.emit("matched", {
+        myRole: "相談者",
+        myName: waitingClient.name,
+        partnerRole: "相談員",
+        partnerName: waitingCounselor.name
       });
+
+      waitingCounselor = null;
+      waitingClient = null;
     } else {
-      waiting[role] = socket;
       socket.emit("waiting");
     }
   });
 
-  socket.on("message", (text) => {
-    const partnerId = pairs.get(socket.id);
-    if (partnerId) {
-      io.to(partnerId).emit("message", {
-        text,
-        from: socket.name,
-        role: socket.role,
-      });
-    }
-  });
-
-  socket.on("disconnectChat", () => {
-    handleDisconnect(socket);
+  socket.on("chat", (msg) => {
+    socket.broadcast.emit("chat", {
+      role: socket.role,
+      name: socket.name,
+      message: msg
+    });
   });
 
   socket.on("disconnect", () => {
-    handleDisconnect(socket);
+    if (waitingCounselor === socket) waitingCounselor = null;
+    if (waitingClient === socket) waitingClient = null;
   });
-
-  function handleDisconnect(socket) {
-    const partnerId = pairs.get(socket.id);
-
-    if (partnerId) {
-      io.to(partnerId).emit("partnerDisconnected");
-      pairs.delete(partnerId);
-      pairs.delete(socket.id);
-    }
-
-    if (waiting[socket.role]?.id === socket.id) {
-      waiting[socket.role] = null;
-    }
-  }
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+http.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 });
