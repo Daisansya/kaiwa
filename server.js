@@ -9,23 +9,26 @@ const io = new Server(server);
 app.use(express.static("public"));
 
 let waiting = {
-  counselor: new Set(),
-  client: new Set(),
+  counselor: null,
+  client: null,
 };
 
-let pairs = new Map(); // socket.id -> partner.id
+let pairs = new Map();
 
-function broadcastStatus() {
-  io.emit("statusUpdate", {
-    total: io.engine.clientsCount,
-    waitingCounselor: waiting.counselor.size,
-    waitingClient: waiting.client.size,
+/* 人数を全員に送る関数 */
+function emitCount() {
+  const online = io.engine.clientsCount;
+  const waitingCount =
+    (waiting.counselor ? 1 : 0) + (waiting.client ? 1 : 0);
+
+  io.emit("count", {
+    online,
+    waiting: waitingCount,
   });
 }
 
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
-  broadcastStatus();
+  emitCount();
 
   socket.on("selectRole", ({ role, name }) => {
     socket.role = role;
@@ -33,9 +36,9 @@ io.on("connection", (socket) => {
 
     const opposite = role === "counselor" ? "client" : "counselor";
 
-    if (waiting[opposite].size > 0) {
-      const partner = waiting[opposite].values().next().value;
-      waiting[opposite].delete(partner);
+    if (waiting[opposite]) {
+      const partner = waiting[opposite];
+      waiting[opposite] = null;
 
       pairs.set(socket.id, partner.id);
       pairs.set(partner.id, socket.id);
@@ -50,19 +53,18 @@ io.on("connection", (socket) => {
         partnerName: socket.name,
       });
     } else {
-      waiting[role].add(socket);
+      waiting[role] = socket;
       socket.emit("waiting");
     }
 
-    broadcastStatus();
+    emitCount();
   });
 
   socket.on("cancelWaiting", () => {
-    if (socket.role && waiting[socket.role]) {
-      waiting[socket.role].delete(socket);
+    if (waiting[socket.role]?.id === socket.id) {
+      waiting[socket.role] = null;
     }
-    socket.emit("waitingCanceled");
-    broadcastStatus();
+    emitCount();
   });
 
   socket.on("message", (text) => {
@@ -93,11 +95,11 @@ io.on("connection", (socket) => {
       pairs.delete(socket.id);
     }
 
-    if (socket.role && waiting[socket.role]) {
-      waiting[socket.role].delete(socket);
+    if (waiting[socket.role]?.id === socket.id) {
+      waiting[socket.role] = null;
     }
 
-    broadcastStatus();
+    emitCount();
   }
 });
 
