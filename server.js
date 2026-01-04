@@ -15,14 +15,6 @@ let waitingCounselor = null;
 let waitingClient = null;
 
 io.on("connection", (socket) => {
-  socket.on("disconnect", () => {
-  if (waitingCounselor === socket) {
-    waitingCounselor = null;
-  }
-  if (waitingClient === socket) {
-    waitingClient = null;
-  }
-});
 socket.on("selectRole", ({ role, name }) => {
   socket.role = role;
   socket.name = name;
@@ -70,4 +62,5 @@ const PORT = process.env.PORT || 3000;
 http.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 });
+
 
