@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>会話</title>
+
+  <style>
+    body {
+      font-family: "Yu Mincho", "Hiragino Mincho ProN", serif;
+      background: #f6f6f4;
+      color: #222;
+      max-width: 600px;
+      margin: 40px auto;
+      line-height: 1.7;
+    }
+
+    h1 {
+      font-size: 1.4em;
+      margin-bottom: 20px;
+    }
+
+    button {
+      background: none;
+      border: 1px solid #888;
+      padding: 6px 14px;
+      margin-right: 10px;
+      cursor: pointer;
+      font-size: 0.9em;
+    }
+
+    button:hover {
+      background: #eaeaea;
+    }
+
+    #chat {
+      margin-top: 30px;
+    }
+
+    #msg {
+      width: 80%;
+      padding: 6px;
+      font-size: 0.9em;
+    }
+
+    ul#log {
+      margin-top: 20px;
+    }
+
+    ul#log li {
+      max-width: 80%;
+      padding: 6px 10px;
+      border-radius: 6px;
+    }
+
+    ul#log li[style*="right"] {
+      margin-left: auto;
+      background: #dde7ff;
+    }
+
+    ul#log li[style*="left"] {
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <h1 id="status">役割を選んでください</h1>
+
+  <button onclick="selectRole('consultant')">相談員</button>
+  <button onclick="selectRole('client')">相談者</button>
+
+  <div id="chat" style="display:none; margin-top:20px;">
+    <input id="msg" placeholder="メッセージ">
+    <button onclick="send()">送信</button>
+    <ul id="log" style="list-style:none; padding:0;"></ul>
+  </div>
+
+  <!-- socket.io を読み込む（消さない） -->
+  <script src="/socket.io/socket.io.js"></script>
+
+  <!-- ここから下が JavaScript 本体 -->
+  <script>
+    const socket = io();
+
+    function selectRole(role) {
+      socket.emit("selectRole", role);
+      document.getElementById("status").innerText = "待機中です…";
+    }
+
+    socket.on("matched", () => {
+      document.getElementById("status").innerText = "相手が見つかりました";
+      document.getElementById("chat").style.display = "block";
+    });
+
+    function addMessage(text, who) {
+      const li = document.createElement("li");
+      li.innerText = text;
+      li.style.margin = "5px 0";
+
+      if (who === "me") {
+        li.style.textAlign = "right";
+        li.style.color = "blue";
+      } else {
+        li.style.textAlign = "left";
+        li.style.color = "black";
+      }
+
+      document.getElementById("log").appendChild(li);
+    }
+
+    function send() {
+      const input = document.getElementById("msg");
+      const text = input.value.trim();
+      if (!text) return;
+
+      addMessage(text, "me");
+      socket.emit("message", text);
+      input.value = "";
+    }
+
+    socket.on("message", (msg) => {
+      addMessage(msg, "other");
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+  "name": "kaiwa",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "express": "^5.2.1",
+    "package.json": "^2.0.1",
+    "socket.io": "^4.8.3"
+  }
+}
