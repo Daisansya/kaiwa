@@ -1,82 +1,107 @@
 const express = require("express");
-const path = require("path");
+const http = require("http");
+const { Server } = require("socket.io");
+
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http);
+const server = http.createServer(app);
+const io = new Server(server);
 
-app.use(express.static(__dirname));
+app.use(express.static("public"));
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
-});
+let waiting = {
+  counselor: new Set(),
+  client: new Set(),
+};
 
-let waitingCounselor = null;
-let waitingClient = null;
+let pairs = new Map(); // socket.id -> partner.id
+
+function broadcastStatus() {
+  io.emit("statusUpdate", {
+    total: io.engine.clientsCount,
+    waitingCounselor: waiting.counselor.size,
+    waitingClient: waiting.client.size,
+  });
+}
 
 io.on("connection", (socket) => {
+  console.log("connected:", socket.id);
+  broadcastStatus();
 
   socket.on("selectRole", ({ role, name }) => {
     socket.role = role;
     socket.name = name || "匿名";
 
-    if (socket.matched) return;
+    const opposite = role === "counselor" ? "client" : "counselor";
 
-    if (role === "counselor") {
-      if (waitingCounselor) {
-        socket.emit("waiting");
-        return;
-      }
-      waitingCounselor = socket;
-    }
+    if (waiting[opposite].size > 0) {
+      const partner = waiting[opposite].values().next().value;
+      waiting[opposite].delete(partner);
 
-    if (role === "client") {
-      if (waitingClient) {
-        socket.emit("waiting");
-        return;
-      }
-      waitingClient = socket;
-    }
+      pairs.set(socket.id, partner.id);
+      pairs.set(partner.id, socket.id);
 
-    if (waitingCounselor && waitingClient) {
-      waitingCounselor.matched = true;
-      waitingClient.matched = true;
-
-      waitingCounselor.emit("matched", {
-        myRole: "相談員",
-        myName: waitingCounselor.name,
-        partnerRole: "相談者",
-        partnerName: waitingClient.name
+      socket.emit("matched", {
+        role,
+        partnerName: partner.name,
       });
 
-      waitingClient.emit("matched", {
-        myRole: "相談者",
-        myName: waitingClient.name,
-        partnerRole: "相談員",
-        partnerName: waitingCounselor.name
+      partner.emit("matched", {
+        role: opposite,
+        partnerName: socket.name,
       });
-
-      waitingCounselor = null;
-      waitingClient = null;
     } else {
+      waiting[role].add(socket);
       socket.emit("waiting");
+    }
+
+    broadcastStatus();
+  });
+
+  socket.on("cancelWaiting", () => {
+    if (socket.role && waiting[socket.role]) {
+      waiting[socket.role].delete(socket);
+    }
+    socket.emit("waitingCanceled");
+    broadcastStatus();
+  });
+
+  socket.on("message", (text) => {
+    const partnerId = pairs.get(socket.id);
+    if (partnerId) {
+      io.to(partnerId).emit("message", {
+        text,
+        from: socket.name,
+        role: socket.role,
+      });
     }
   });
 
-  socket.on("chat", (msg) => {
-    socket.broadcast.emit("chat", {
-      role: socket.role,
-      name: socket.name,
-      message: msg
-    });
+  socket.on("disconnectChat", () => {
+    handleDisconnect(socket);
   });
 
   socket.on("disconnect", () => {
-    if (waitingCounselor === socket) waitingCounselor = null;
-    if (waitingClient === socket) waitingClient = null;
+    handleDisconnect(socket);
   });
+
+  function handleDisconnect(socket) {
+    const partnerId = pairs.get(socket.id);
+
+    if (partnerId) {
+      io.to(partnerId).emit("partnerDisconnected");
+      pairs.delete(partnerId);
+      pairs.delete(socket.id);
+    }
+
+    if (socket.role && waiting[socket.role]) {
+      waiting[socket.role].delete(socket);
+    }
+
+    broadcastStatus();
+  }
 });
 
 const PORT = process.env.PORT || 3000;
-http.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on ${PORT}`);
 });
