@@ -13,7 +13,7 @@ let waiting = {
   client: new Set(),
 };
 
-let pairs = new Map(); // socket.id -> partner.id
+let pairs = new Map();
 
 function broadcastStatus() {
   io.emit("statusUpdate", {
@@ -24,12 +24,11 @@ function broadcastStatus() {
 }
 
 io.on("connection", (socket) => {
-  console.log("connected:", socket.id);
   broadcastStatus();
 
   socket.on("selectRole", ({ role, name }) => {
     socket.role = role;
-    socket.name = (name || "匿名").slice(0, 30); // ★ 30文字制限
+    socket.name = (name || "匿名").slice(0, 30);
 
     const opposite = role === "counselor" ? "client" : "counselor";
 
@@ -65,15 +64,21 @@ io.on("connection", (socket) => {
     broadcastStatus();
   });
 
+  // ★★★ ここが重要 ★★★
   socket.on("message", (text) => {
     const partnerId = pairs.get(socket.id);
-    if (partnerId) {
-      io.to(partnerId).emit("message", {
-        text,
-        from: socket.name,
-        role: socket.role,
-      });
-    }
+    if (!partnerId) return;
+
+    const payload = {
+      text,
+      from: socket.name,
+      role: socket.role,
+    };
+
+    // 相手に送る
+    io.to(partnerId).emit("message", payload);
+    // 自分にも送る（ログ用）
+    socket.emit("message", payload);
   });
 
   socket.on("disconnectChat", () => {
