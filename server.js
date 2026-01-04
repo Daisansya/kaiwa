@@ -8,20 +8,46 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static(__dirname));
-
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// 待機リスト
 let waitingClients = [];
 let waitingCounselors = [];
 
-// 待機解除（重要）
 function cancelWaiting(socket) {
   waitingClients = waitingClients.filter(s => s.id !== socket.id);
   waitingCounselors = waitingCounselors.filter(s => s.id !== socket.id);
-  socket.role = null;
+}
+
+function tryMatch() {
+  while (waitingClients.length > 0 && waitingCounselors.length > 0) {
+    const client = waitingClients.shift();
+    const counselor = waitingCounselors.shift();
+
+    // 念のための安全装置
+    if (!client || !counselor) continue;
+    if (client.id === counselor.id) {
+      // 自己マッチ防止：列に戻す
+      waitingClients.push(client);
+      continue;
+    }
+
+    client.partner = counselor;
+    counselor.partner = client;
+
+    client.emit("matched", {
+      role: "相談者",
+      partnerRole: "相談員"
+    });
+
+    counselor.emit("matched", {
+      role: "相談員",
+      partnerRole: "相談者"
+    });
+
+    return; // 1組マッチしたら終了
+  }
 }
 
 io.on("connection", (socket) => {
@@ -36,7 +62,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("selectRole", (role) => {
-    // ★ ここが今回の核心：必ずリセット
     cancelWaiting(socket);
 
     socket.role = role;
@@ -70,7 +95,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("切断:", socket.id);
     if (socket.partner) {
       socket.partner.emit("partnerDisconnected");
       socket.partner.partner = null;
@@ -78,32 +102,6 @@ io.on("connection", (socket) => {
     cancelWaiting(socket);
   });
 });
-
-// マッチング処理
-function tryMatch() {
-  if (waitingClients.length === 0 || waitingCounselors.length === 0) return;
-
-  const client = waitingClients.shift();
-  const counselor = waitingCounselors.shift();
-
-  // 念のため自己マッチ防止
-  if (client.id === counselor.id) {
-    return;
-  }
-
-  client.partner = counselor;
-  counselor.partner = client;
-
-  client.emit("matched", {
-    role: "相談者",
-    partnerRole: "相談員"
-  });
-
-  counselor.emit("matched", {
-    role: "相談員",
-    partnerRole: "相談者"
-  });
-}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
